@@ -1,8 +1,10 @@
+import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, InlineQueryHandler, filters
 
-TOKEN = "8696587166:AAEIEyrjxsaY75X7JkzC3gfWP43SO5YbuXA"
+# خواندن توکن از متغیرهای محیطی Railway
+TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 7281188442
 
 votes = {}
@@ -11,7 +13,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     guide_text = (
         "👋 **به ربات چالش و لایک خوش آمدید!**\n\n"
         "📖 **راهنمای استفاده از ربات:**\n\n"
-        "1️⃣ **ارسال مستقیم اسم شرکت‌‌کننده:**\n"
+        "1️⃣ **ارسال مستقیم اسم شرکت‌کننده:**\n"
         "کافیست در همین چت، اسم شرکت‌کننده را بفرستید تا بنر لایک‌‌دار برای شما ساخته شود.\n\n"
         "2️⃣ **استفاده در گروه و کانال (Inline Mode):**\n"
         "در هر چت، گروه یا کانالی عبارت زیر را تایپ کنید:\n"
@@ -26,11 +28,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
-    
     keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(name, reply_markup=reply_markup)
+    await update.message.reply_text(name, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.strip()
@@ -51,7 +50,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
     keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
-    
     results = [
         InlineQueryResultArticle(
             id="1",
@@ -111,7 +109,7 @@ async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_id = int(context.args[1])
         count = int(context.args[2])
 
-        keyboard = [[InlineKeyboardButton(f"{count} ❤️", callback_data="like")]]
+        keyboard = [[InlineKeyboardButton(f"{count} ❤️️", callback_data="like")]]
         await context.bot.edit_message_reply_markup(
             chat_id=chat_id,
             message_id=msg_id,
@@ -131,4 +129,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name))
     
     app.run_polling()
-    
+            
