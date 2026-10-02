@@ -13,7 +13,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 به ربات چالش و لایک خوش آمدید!\n\n"
         "📖 راهنمای استفاده از ربات:\n\n"
         "1️⃣ ارسال مستقیم اسم شرکت‌کننده:\n"
-        "کافیست اسم شرکت‌کننده را بفرستید تا بنر لایک‌دار برای شما ساخته شود.\n\n"
+        "کافیست در پیوی ربات، اسم شرکت‌کننده را بفرستید تا بنر لایک‌‌دار برای شما ساخته شود.\n\n"
         "2️⃣ استفاده در گروه و کانال (Inline Mode):\n"
         "در هر چت عبارت زیر را تایپ کنید:\n"
         "@Chahchahvarz_bot اسم_شرکت‌کننده\n"
@@ -120,7 +120,9 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("addlike", add_likes))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(CallbackQueryHandler(handle_like))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name))
+    
+    # تغییر این خط: فقط در پیام خصوصی (Private) اسم‌ها تبدیل به لایک می‌شوند
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_name))
     
     app.run_polling()
     
