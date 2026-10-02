@@ -1,8 +1,8 @@
 import os
 import sqlite3
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, InlineQueryHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 7281188442
@@ -57,7 +57,7 @@ def record_user_vote(click_key: str):
     conn.commit()
     conn.close()
 
-# --- بررسی عضویت در کانال ---
+# --- بررسی عضویت کاربر در کانال ---
 async def is_user_member(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
     try:
         member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
@@ -68,14 +68,27 @@ async def is_user_member(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: i
         return True
     return False
 
+# --- بررسی ادمین یا مالک بودن کاربر در کانال ---
+async def is_channel_admin(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
+    # ادمین اصلی ربات همیشه دسترسی دارد
+    if user_id == ADMIN_ID:
+        return True
+    try:
+        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        if member.status in ["creator", "administrator"]:
+            return True
+    except Exception as e:
+        print(f"Error checking channel admin: {e}")
+        return False
+    return False
+
 # --- توابع ربات ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     guide_text = (
         "👋 به ربات چالش و لایک خوش آمدید!\n\n"
         "📖 راهنمای استفاده از ربات:\n\n"
-        "1️⃣ ارسال مستقیم اسم شرکت‌کننده:\n"
-        "کافیست در پیوی ربات، اسم شرکت‌کننده را بفرستید تا بنر لایک‌دار برای شما ساخته شود.\n\n"
-        "2️⃣ ارسال به کانال توسط ادمین:\n"
+        "1️⃣ ارسال مستقیم اسم شرکت‌کننده در پیوی ربات برای ساخت بنر.\n"
+        "2️⃣ ارسال چالش به کانال (فقط مخصوص ادمین و مالک کانال):\n"
         "`/send @channel_id اسم_شرکت‌کننده`"
     )
     await update.message.reply_text(guide_text, parse_mode="Markdown")
@@ -85,14 +98,23 @@ async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
     await update.message.reply_text(f"🏆 چالش: {name}", reply_markup=InlineKeyboardMarkup(keyboard))
 
+# ارسال پست فقط توسط مالک یا ادمین کانال
 async def send_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    user_id = update.effective_user.id
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text("❌ فرمت درست:\n`/send @channel_id اسم_شرکت‌کننده`", parse_mode="Markdown")
+        return
+
+    channel_id = context.args[0]
+    name = " ".join(context.args[1:])
+
+    # ۱. بررسی ادمین/مالک بودن کاربر در کانال مقصد
+    if not await is_channel_admin(context, channel_id, user_id):
+        await update.message.reply_text("⛔️ شما ادمین یا مالک این کانال نیستید و نمی‌توانید در آن چالش قرار دهید!")
         return
 
     try:
-        channel_id = context.args[0]
-        name = " ".join(context.args[1:])
-        
         keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
         sent_msg = await context.bot.send_message(
             chat_id=channel_id,
@@ -100,39 +122,35 @@ async def send_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         await update.message.reply_text(
-            f"✅ بنر در کانال قرار گرفت!\n🆔 آیدی پیام: `{sent_msg.message_id}`",
+            f"✅ بنر با موفقیت در کانال قرار گرفت!\n🆔 آیدی پیام: `{sent_msg.message_id}`",
             parse_mode="Markdown"
         )
     except Exception as e:
-        await update.message.reply_text("❌ فرمت درست:\n`/send @channel_id اسم_شرکت‌کننده`", parse_mode="Markdown")
+        await update.message.reply_text(f"❌ خطا در ارسال! مطمئن شوید ربات در کانال ادمین است.\nجزئیات: {e}")
 
 async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     
-    # ۱. بررسی عضویت در کانال
+    # بررسی عضویت در کانال
     if query.message and query.message.chat:
         chat_id = query.message.chat.id
         if not await is_user_member(context, chat_id, user_id):
-            await query.answer("⚠️ برای ثبت لایک باید ابتدا عضو این کانال شوید!", show_alert=True)
+            await query.answer("⚠️️ برای ثبت لایک باید ابتدا عضو این کانال شوید!", show_alert=True)
             return
 
     inline_id = query.inline_message_id
     msg_key = inline_id if inline_id else f"{query.message.chat_id}_{query.message.message_id}"
     click_key = f"{msg_key}_{user_id}"
 
-    # ۲. بررسی اینکه آیا کاربر قبلاً لایک زده است یا خیر
+    # بررسی لایک تکراری
     if has_user_voted(click_key):
         await query.answer("⚠️ شما قبلاً به این چالش رای داده‌اید و امکان رای مجدد وجود ندارد!", show_alert=True)
         return
 
-    # ۳. خواندن عدد فعلی لایک
     current_likes = get_like_count(msg_key, 0)
-
-    # افزایش لایک
     new_likes = current_likes + 1
     
-    # ثبت رأی کاربر و مقدار جدید لایک در دیتابیس
     record_user_vote(click_key)
     set_like_count(msg_key, new_likes)
 
@@ -199,4 +217,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_name))
     
     app.run_polling()
-            
+    
