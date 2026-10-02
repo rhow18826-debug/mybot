@@ -2,7 +2,7 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, InlineQueryHandler, filters
 
-TOKEN = "88696587166:AAEIEyrjxsaY75X7JkzC3gfWP43SO5YbuXA"
+TOKEN = "8696587166:AAEIEyrjxsaY75X7JkzC3gfWP43SO5YbuXA"
 ADMIN_ID = 7281188442
 
 votes = {}
@@ -11,7 +11,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     guide_text = (
         "👋 **به ربات چالش و لایک خوش آمدید!**\n\n"
         "📖 **راهنمای استفاده از ربات:**\n\n"
-        "1️⃣ **ارسال مستقیم اسم شرکت‌کننده:**\n"
+        "1️⃣ **ارسال مستقیم اسم شرکت‌‌کننده:**\n"
         "کافیست در همین چت، اسم شرکت‌کننده را بفرستید تا بنر لایک‌‌دار برای شما ساخته شود.\n\n"
         "2️⃣ **استفاده در گروه و کانال (Inline Mode):**\n"
         "در هر چت، گروه یا کانالی عبارت زیر را تایپ کنید:\n"
@@ -131,4 +131,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name))
     
     app.run_polling()
-                
+    
