@@ -17,9 +17,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2️⃣ استفاده در گروه و کانال (Inline Mode):\n"
         "در هر چت عبارت زیر را تایپ کنید:\n"
         "@Chahchahvarz_bot اسم_شرکت‌کننده\n"
-        "(نکته: فقط مدیران امکان ایجاد چالش اینلاین را دارند.)\n\n"
-        "3️⃣ افزایش لایک توسط ادمین:\n"
-        "/addlike آیدی_کانال شناسه_پست تعداد"
+        "(نکته: فقط مدیران امکان ایجاد چالش اینلاین را دارند.)"
     )
     await update.message.reply_text(guide_text)
 
@@ -98,7 +96,6 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("شما دسترسی ادمین ندارید.")
         return
 
     try:
@@ -114,7 +111,7 @@ async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(f"✅ لایک پست به {count} تغییر یافت!")
     except Exception:
-        await update.message.reply_text("فرمت ادمین:\n/addlike آیدی_کانال شناسه_پست تعداد")
+        pass
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
@@ -126,4 +123,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name))
     
     app.run_polling()
-        
+    
