@@ -45,18 +45,13 @@ async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg_id = int(context.args[0])
         count_to_add = int(context.args[1])
 
-        msg = await context.bot.get_message(chat_id=CHANNEL_USERNAME, message_id=msg_id)
-        current_text = msg.reply_markup.inline_keyboard[0][0].text
-        current_likes = int(current_text.split()[0])
-        new_likes = current_likes + count_to_add
-
-        keyboard = [[InlineKeyboardButton(f"{new_likes} ❤️", callback_data="like")]]
+        keyboard = [[InlineKeyboardButton(f"{count_to_add} ❤️", callback_data="like")]]
         await context.bot.edit_message_reply_markup(
             chat_id=CHANNEL_USERNAME,
             message_id=msg_id,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        await update.message.reply_text(f"✅ تعداد {count_to_add} لایک اضافه شد! مجموع لایک‌ها: {new_likes}")
+        await update.message.reply_text(f"✅ لایک‌های پست {msg_id} به‌روزرسانی شد!")
     except Exception as e:
         await update.message.reply_text("راهنما استفاده ادمین:\n`/addlike شناسه_پست تعداد`\nمثال:\n`/addlike 105 50`", parse_mode="Markdown")
 
@@ -69,4 +64,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_name))
     
     app.run_polling()
-    
+        
