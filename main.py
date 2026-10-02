@@ -8,12 +8,24 @@ ADMIN_ID = 7281188442
 
 votes = {}
 
+async def is_user_member(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
+    """بررسی عضویت کاربر در همان کانالی که پست در آن قرار دارد"""
+    try:
+        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        if member.status in ["creator", "administrator", "member"]:
+            return True
+    except Exception as e:
+        print(f"Error checking membership for chat {chat_id}: {e}")
+        # اگر مشکلی در بررسی پیش آمد یا پیام اینلاین بود، مانع لایک نمی‌شود
+        return True
+    return False
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     guide_text = (
         "👋 به ربات چالش و لایک خوش آمدید!\n\n"
         "📖 راهنمای استفاده از ربات:\n\n"
         "1️⃣ ارسال مستقیم اسم شرکت‌کننده:\n"
-        "کافیست در پیوی ربات، اسم شرکت‌کننده را بفرستید تا بنر لایک‌‌دار برای شما ساخته شود.\n\n"
+        "کافیست در پیوی ربات، اسم شرکت‌کننده را بفرستید تا بنر لایک‌‌‌‌دار برای شما ساخته شود.\n\n"
         "2️⃣ استفاده در گروه و کانال (Inline Mode):\n"
         "در هر چت عبارت زیر را تایپ کنید:\n"
         "@Chahchahvarz_bot اسم_شرکت‌کننده\n"
@@ -23,7 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = update.message.text.strip()
-    keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
+    keyboard = [[InlineKeyboardButton("0 ❤️️", callback_data="like")]]
     await update.message.reply_text(name, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,6 +71,16 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     
+    # اگر پیام معمولی در کانال/گروه باشد، چت مربوطه شناسایی می‌شود
+    if query.message and query.message.chat:
+        chat_id = query.message.chat.id
+        if not await is_user_member(context, chat_id, user_id):
+            await query.answer(
+                "⚠️ برای ثبت لایک باید ابتدا عضو این کانال شوید!", 
+                show_alert=True
+            )
+            return
+
     inline_id = query.inline_message_id
     msg_key = inline_id if inline_id else f"{query.message.chat_id}_{query.message.message_id}"
 
@@ -120,8 +142,6 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("addlike", add_likes))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(CallbackQueryHandler(handle_like))
-    
-    # تغییر این خط: فقط در پیام خصوصی (Private) اسم‌ها تبدیل به لایک می‌شوند
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_name))
     
     app.run_polling()
