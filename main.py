@@ -6,7 +6,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 7281188442
 
-votes = {}
+# ذخیره وضعیت کلیک کاربران برای جلوگیری از لایک تکراری متوالی
+user_clicks = {}
 
 async def is_user_member(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
     try:
@@ -69,6 +70,7 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     
+    # بررسی عضویت در کانال
     if query.message and query.message.chat:
         chat_id = query.message.chat.id
         if not await is_user_member(context, chat_id, user_id):
@@ -78,26 +80,26 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inline_id = query.inline_message_id
     msg_key = inline_id if inline_id else f"{query.message.chat_id}_{query.message.message_id}"
 
-    if msg_key not in votes:
-        votes[msg_key] = set()
-
-    # استخراج عدد دقیق روی دکمه
+    # خواندن مستقیم عدد از متن دکمه
+    current_likes = 0
     try:
         if query.message and query.message.reply_markup:
             button_text = query.message.reply_markup.inline_keyboard[0][0].text
             current_likes = int(button_text.split()[0])
-        else:
-            current_likes = len(votes[msg_key])
     except Exception:
         current_likes = 0
 
-    if user_id in votes[msg_key]:
-        votes[msg_key].remove(user_id)
+    # بررسی وضعیت کلیک کاربر برای سوئیچ بین لایک و برداشتن لایک
+    click_key = f"{msg_key}_{user_id}"
+    has_liked = user_clicks.get(click_key, False)
+
+    if has_liked:
         new_likes = max(0, current_likes - 1)
+        user_clicks[click_key] = False
         await query.answer("لایک شما برداشته شد!")
     else:
-        votes[msg_key].add(user_id)
         new_likes = current_likes + 1
+        user_clicks[click_key] = True
         await query.answer("❤️ لایک شما ثبت شد!")
 
     keyboard = [[InlineKeyboardButton(f"{new_likes} ❤️", callback_data="like")]]
@@ -129,15 +131,9 @@ async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message_id=msg_id,
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-        
-        # همگام‌سازی متغیر حافظه
-        msg_key = f"{chat_id}_{msg_id}"
-        if msg_key not in votes:
-            votes[msg_key] = set()
-
         await update.message.reply_text(f"✅ لایک پست به {count} تغییر یافت!")
-    except Exception:
-        pass
+    except Exception as e:
+        await update.message.reply_text("فرمت اشتباه است. نمونه:\n/addlike @channel_id 123 150")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
