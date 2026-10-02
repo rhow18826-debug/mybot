@@ -6,7 +6,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 7281188442
 
-# ذخیره وضعیت کلیک کاربران برای جلوگیری از لایک تکراری متوالی
+# حافظه اصلی لایک‌ها و کلیک‌ها
+likes_db = {}
 user_clicks = {}
 
 async def is_user_member(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
@@ -70,7 +71,7 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     
-    # بررسی عضویت در کانال
+    # بررسی عضویت در کانال برای پیام‌های غیر اینلاین
     if query.message and query.message.chat:
         chat_id = query.message.chat.id
         if not await is_user_member(context, chat_id, user_id):
@@ -80,16 +81,21 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inline_id = query.inline_message_id
     msg_key = inline_id if inline_id else f"{query.message.chat_id}_{query.message.message_id}"
 
-    # خواندن مستقیم عدد از متن دکمه
-    current_likes = 0
-    try:
-        if query.message and query.message.reply_markup:
-            button_text = query.message.reply_markup.inline_keyboard[0][0].text
-            current_likes = int(button_text.split()[0])
-    except Exception:
+    # ۱. خواندن مقدار فعلی لایک از پایگاه داده حافظه
+    if msg_key not in likes_db:
+        # اگر در حافظه نبود سعی می‌کنیم از روی دکمه پیام چت عادی بخوانیم
         current_likes = 0
+        if query.message and query.message.reply_markup:
+            try:
+                button_text = query.message.reply_markup.inline_keyboard[0][0].text
+                current_likes = int(button_text.split()[0])
+            except Exception:
+                current_likes = 0
+        likes_db[msg_key] = current_likes
 
-    # بررسی وضعیت کلیک کاربر برای سوئیچ بین لایک و برداشتن لایک
+    current_likes = likes_db[msg_key]
+
+    # ۲. محاسبه لایک یا آن‌‌لایک
     click_key = f"{msg_key}_{user_id}"
     has_liked = user_clicks.get(click_key, False)
 
@@ -102,7 +108,10 @@ async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_clicks[click_key] = True
         await query.answer("❤️ لایک شما ثبت شد!")
 
-    keyboard = [[InlineKeyboardButton(f"{new_likes} ❤️", callback_data="like")]]
+    # ۳. به روزرسانی حافظه
+    likes_db[msg_key] = new_likes
+
+    keyboard = [[InlineKeyboardButton(f"{new_likes} ❤️️", callback_data="like")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     try:
@@ -121,9 +130,28 @@ async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        chat_id = context.args[0]
+        target = context.args[0]
+        
+        # اگر تغییر لایک برای پیام اینلاین باشد (شناسه طولانی)
+        if len(context.args) == 2 and not target.startswith("@") and not target.startswith("-"):
+            inline_id = target
+            count = int(context.args[1])
+            likes_db[inline_id] = count
+            keyboard = [[InlineKeyboardButton(f"{count} ❤️", callback_data="like")]]
+            await context.bot.edit_message_reply_markup(
+                inline_message_id=inline_id,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            await update.message.reply_text(f"✅ لایک پیام اینلاین به {count} تغییر یافت!")
+            return
+
+        # حالت معمولی: /addlike @channel_id 123 150
+        chat_id = target
         msg_id = int(context.args[1])
         count = int(context.args[2])
+
+        msg_key = f"{chat_id}_{msg_id}"
+        likes_db[msg_key] = count
 
         keyboard = [[InlineKeyboardButton(f"{count} ❤️", callback_data="like")]]
         await context.bot.edit_message_reply_markup(
@@ -133,7 +161,7 @@ async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(f"✅ لایک پست به {count} تغییر یافت!")
     except Exception as e:
-        await update.message.reply_text("فرمت اشتباه است. نمونه:\n/addlike @channel_id 123 150")
+        await update.message.reply_text("فرمت اشتباه است.")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
