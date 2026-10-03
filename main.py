@@ -1,220 +1,227 @@
 import os
+import asyncio
+import random
 import sqlite3
-import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 7281188442
-DB_NAME = "bot_database.db"
+DB_NAME = "wheels.db"
 
-# --- دیتابیس برای ذخیره لایک‌ها و ثبت رأی کاربران ---
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS post_likes (
-            msg_key TEXT PRIMARY KEY,
-            like_count INTEGER DEFAULT 0
+        CREATE TABLE IF NOT EXISTS wheels (
+            wheel_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            participants TEXT,
+            forced_winner TEXT DEFAULT NULL,
+            photo_id TEXT DEFAULT NULL,
+            is_active INTEGER DEFAULT 1
         )
     ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_votes (
-            click_key TEXT PRIMARY KEY,
-            has_liked INTEGER DEFAULT 0
-        )
-    ''')
     conn.commit()
     conn.close()
 
-def get_like_count(msg_key: str, default_val: int = 0) -> int:
+def create_wheel(title: str) -> int:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT like_count FROM post_likes WHERE msg_key = ?", (msg_key,))
+    cursor.execute("INSERT INTO wheels (title, participants) VALUES (?, ?)", (title, ""))
+    wheel_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return wheel_id
+
+def add_participant(wheel_id: int, name: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT participants FROM wheels WHERE wheel_id = ?", (wheel_id,))
+    row = cursor.fetchone()
+    if row:
+        current = row[0].split(",") if row[0] else []
+        if name not in current:
+            current.append(name)
+            updated = ",".join(current)
+            cursor.execute("UPDATE wheels SET participants = ? WHERE wheel_id = ?", (updated, wheel_id))
+            conn.commit()
+    conn.close()
+
+def set_forced_winner(wheel_id: int, name: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE wheels SET forced_winner = ? WHERE wheel_id = ?", (name, wheel_id))
+    conn.commit()
+    conn.close()
+
+def set_wheel_photo(wheel_id: int, photo_id: str):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE wheels SET photo_id = ? WHERE wheel_id = ?", (photo_id, wheel_id))
+    conn.commit()
+    conn.close()
+
+def get_wheel_data(wheel_id: int):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, participants, forced_winner, photo_id FROM wheels WHERE wheel_id = ?", (wheel_id,))
     row = cursor.fetchone()
     conn.close()
-    return row[0] if row else default_val
+    if row:
+        parts = row[1].split(",") if row[1] else []
+        return {
+            "title": row[0],
+            "participants": parts,
+            "forced_winner": row[2],
+            "photo_id": row[3]
+        }
+    return None
 
-def set_like_count(msg_key: str, count: int):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO post_likes (msg_key, like_count) VALUES (?, ?) ON CONFLICT(msg_key) DO UPDATE SET like_count = ?", (msg_key, count, count))
-    conn.commit()
-    conn.close()
-
-def has_user_voted(click_key: str) -> bool:
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT has_liked FROM user_votes WHERE click_key = ?", (click_key,))
-    row = cursor.fetchone()
-    conn.close()
-    return bool(row[0]) if row and row[0] == 1 else False
-
-def record_user_vote(click_key: str):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO user_votes (click_key, has_liked) VALUES (?, 1) ON CONFLICT(click_key) DO UPDATE SET has_liked = 1", (click_key,))
-    conn.commit()
-    conn.close()
-
-# --- بررسی عضویت کاربر در کانال ---
-async def is_user_member(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
-    try:
-        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-        if member.status in ["creator", "administrator", "member"]:
-            return True
-    except Exception as e:
-        print(f"Error checking membership: {e}")
-        return True
-    return False
-
-# --- بررسی ادمین یا مالک بودن کاربر در کانال ---
-async def is_channel_admin(context: ContextTypes.DEFAULT_TYPE, chat_id, user_id: int) -> bool:
-    # ادمین اصلی ربات همیشه دسترسی دارد
-    if user_id == ADMIN_ID:
-        return True
-    try:
-        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-        if member.status in ["creator", "administrator"]:
-            return True
-    except Exception as e:
-        print(f"Error checking channel admin: {e}")
-        return False
-    return False
-
-# --- توابع ربات ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    guide_text = (
-        "👋 به ربات چالش و لایک خوش آمدید!\n\n"
-        "📖 راهنمای استفاده از ربات:\n\n"
-        "1️⃣ ارسال مستقیم اسم شرکت‌کننده در پیوی ربات برای ساخت بنر.\n"
-        "2️⃣ ارسال چالش به کانال (فقط مخصوص ادمین و مالک کانال):\n"
-        "`/send @channel_id اسم_شرکت‌کننده`"
-    )
-    await update.message.reply_text(guide_text, parse_mode="Markdown")
-
-async def handle_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    name = update.message.text.strip()
-    keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
-    await update.message.reply_text(f"🏆 چالش: {name}", reply_markup=InlineKeyboardMarkup(keyboard))
-
-# ارسال پست فقط توسط مالک یا ادمین کانال
-async def send_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    if not context.args or len(context.args) < 2:
-        await update.message.reply_text("❌ فرمت درست:\n`/send @channel_id اسم_شرکت‌کننده`", parse_mode="Markdown")
-        return
-
-    channel_id = context.args[0]
-    name = " ".join(context.args[1:])
-
-    # ۱. بررسی ادمین/مالک بودن کاربر در کانال مقصد
-    if not await is_channel_admin(context, channel_id, user_id):
-        await update.message.reply_text("⛔️ شما ادمین یا مالک این کانال نیستید و نمی‌توانید در آن چالش قرار دهید!")
-        return
-
-    try:
-        keyboard = [[InlineKeyboardButton("0 ❤️", callback_data="like")]]
-        sent_msg = await context.bot.send_message(
-            chat_id=channel_id,
-            text=f"🏆 چالش: {name}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        await update.message.reply_text(
-            f"✅ بنر با موفقیت در کانال قرار گرفت!\n🆔 آیدی پیام: `{sent_msg.message_id}`",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطا در ارسال! مطمئن شوید ربات در کانال ادمین است.\nجزئیات: {e}")
-
-async def handle_like(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    # بررسی عضویت در کانال
-    if query.message and query.message.chat:
-        chat_id = query.message.chat.id
-        if not await is_user_member(context, chat_id, user_id):
-            await query.answer("⚠️️ برای ثبت لایک باید ابتدا عضو این کانال شوید!", show_alert=True)
-            return
-
-    inline_id = query.inline_message_id
-    msg_key = inline_id if inline_id else f"{query.message.chat_id}_{query.message.message_id}"
-    click_key = f"{msg_key}_{user_id}"
-
-    # بررسی لایک تکراری
-    if has_user_voted(click_key):
-        await query.answer("⚠️ شما قبلاً به این چالش رای داده‌اید و امکان رای مجدد وجود ندارد!", show_alert=True)
-        return
-
-    current_likes = get_like_count(msg_key, 0)
-    new_likes = current_likes + 1
-    
-    record_user_vote(click_key)
-    set_like_count(msg_key, new_likes)
-
-    keyboard = [[InlineKeyboardButton(f"{new_likes} ❤️", callback_data="like")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    try:
-        if inline_id:
-            await context.bot.edit_message_reply_markup(
-                inline_message_id=inline_id,
-                reply_markup=reply_markup
-            )
-        else:
-            await query.edit_message_reply_markup(reply_markup=reply_markup)
-        await query.answer("❤️ لایک شما با موفقیت ثبت شد!")
-    except Exception as e:
-        print(f"Error updating markup: {e}")
-
-async def add_likes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
+    guide = (
+        "🎰 **راهنمای ربات گردونه:**\n\n"
+        "1️⃣ `/newwheel عنوان`\n"
+        "2️⃣ `/add <wheel_id> نام`\n"
+        "3️⃣ `/setphoto <wheel_id>` (روی کاپشن عکس)\n"
+        "4️⃣ `/setwinner <wheel_id> نام_برنده`\n"
+        "5️⃣ `/sendwheel @channel_id <wheel_id>`"
+    )
+    await update.message.reply_text(guide, parse_mode="Markdown")
 
+async def cmd_new_wheel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("❌ `/newwheel عنوان`", parse_mode="Markdown")
+        return
+    title = " ".join(context.args)
+    wheel_id = create_wheel(title)
+    await update.message.reply_text(f"✅ گردونه با آیدی `{wheel_id}` ساخته شد.", parse_mode="Markdown")
+
+async def cmd_add_participant(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ `/add <wheel_id> نام`", parse_mode="Markdown")
+        return
     try:
-        target = context.args[0]
-        
-        if len(context.args) == 2 and not target.startswith("@") and not target.startswith("-"):
-            inline_id = target
-            count = int(context.args[1])
-            set_like_count(inline_id, count)
-            
-            keyboard = [[InlineKeyboardButton(f"{count} ❤️", callback_data="like")]]
-            await context.bot.edit_message_reply_markup(
-                inline_message_id=inline_id,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            await update.message.reply_text(f"✅ لایک به {count} تغییر یافت!")
+        wheel_id = int(context.args[0])
+        name = " ".join(context.args[1:])
+        data = get_wheel_data(wheel_id)
+        if not data:
+            await update.message.reply_text("❌ پیدا نشد.")
             return
+        add_participant(wheel_id, name)
+        await update.message.reply_text(f"✅ **{name}** اضافه شد.", parse_mode="Markdown")
+    except ValueError:
+        await update.message.reply_text("❌ آیدی عدد باشد.")
 
-        chat_id = target
-        msg_id = int(context.args[1])
-        count = int(context.args[2])
+async def cmd_set_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    message = update.message
+    if not message.photo or not context.args:
+        await message.reply_text("❌ دستور `/setphoto <wheel_id>` را روی عکس بفرستید.", parse_mode="Markdown")
+        return
+    try:
+        wheel_id = int(context.args[0])
+        if not get_wheel_data(wheel_id):
+            await message.reply_text("❌ پیدا نشد.")
+            return
+        photo_id = message.photo[-1].file_id
+        set_wheel_photo(wheel_id, photo_id)
+        await message.reply_text(f"✅ عکس گردونه `{wheel_id}` ثبت شد.", parse_mode="Markdown")
+    except ValueError:
+        await message.reply_text("❌ آیدی عدد باشد.")
 
-        msg_key = f"{chat_id}_{msg_id}"
-        set_like_count(msg_key, count)
+async def cmd_set_winner(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ `/setwinner <wheel_id> نام`", parse_mode="Markdown")
+        return
+    try:
+        wheel_id = int(context.args[0])
+        winner_name = " ".join(context.args[1:])
+        data = get_wheel_data(wheel_id)
+        if not data or winner_name not in data["participants"]:
+            await update.message.reply_text("❌ یافت نشد یا کاربر در لیست نیست.")
+            return
+        set_forced_winner(wheel_id, winner_name)
+        await update.message.reply_text(f"🤫 برنده به **{winner_name}** تغییر کرد.", parse_mode="Markdown")
+    except ValueError:
+        await update.message.reply_text("❌ آیدی عدد باشد.")
 
-        keyboard = [[InlineKeyboardButton(f"{count} ❤️", callback_data="like")]]
-        await context.bot.edit_message_reply_markup(
-            chat_id=chat_id,
-            message_id=msg_id,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-        await update.message.reply_text(f"✅ لایک پست به {count} تغییر یافت!")
-    except Exception:
-        await update.message.reply_text("فرمت صحیح:\n`/addlike @channel_id msg_id 150`", parse_mode="Markdown")
+async def cmd_send_wheel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ `/sendwheel @channel_id <wheel_id>`", parse_mode="Markdown")
+        return
+    target_chat = context.args[0]
+    try:
+        wheel_id = int(context.args[1])
+        data = get_wheel_data(wheel_id)
+        if not data or not data["participants"]:
+            await update.message.reply_text("❌ گردونه خالی است یا وجود ندارد.")
+            return
+        participants_str = "\n".join([f"▫️ {p}" for p in data["participants"]])
+        text = f"🎰 **{data['title']}**\n\n👥 **شرکت‌کنندگان:**\n{participants_str}"
+        keyboard = [[InlineKeyboardButton("🎰 چرخاندن گردونه", callback_data=f"spin_{wheel_id}")]]
+        if data["photo_id"]:
+            await context.bot.send_photo(chat_id=target_chat, photo=data["photo_id"], caption=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await context.bot.send_message(chat_id=target_chat, text=text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text("✅ ارسال شد.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ خطا: {e}")
+
+async def handle_spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    wheel_id = int(query.data.split("_")[1])
+    data = get_wheel_data(wheel_id)
+    if not data or not data["participants"]:
+        return
+    participants = data["participants"]
+    final_winner = data["forced_winner"] if (data["forced_winner"] and data["forced_winner"] in participants) else random.choice(participants)
+    
+    for _ in range(2):
+        for name in participants:
+            kb = [[InlineKeyboardButton(f"🔄 در حال چرخش... 👈 {name}", callback_data="none")]]
+            try:
+                if query.message.photo:
+                    await query.edit_message_caption(caption=f"🎰 **{data['title']}**\n\n🔄 در حال چرخش...", reply_markup=InlineKeyboardMarkup(kb))
+                else:
+                    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(kb))
+                await asyncio.sleep(0.4)
+            except Exception:
+                pass
+
+    final_kb = [
+        [InlineKeyboardButton(f"🏆 برنده: {final_winner} 🎉", callback_data="none")],
+        [InlineKeyboardButton("🎰 چرخاندن مجدد", callback_data=f"spin_{wheel_id}")]
+    ]
+    participants_str = "\n".join([f"▫️ {p}" for p in participants])
+    final_text = f"🎰 **{data['title']}**\n\n👥 **شرکت‌کنندگان:**\n{participants_str}\n\n🏆 **برنده:** **{final_winner}**"
+
+    if query.message.photo:
+        await query.edit_message_caption(caption=final_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(final_kb))
+    else:
+        await query.edit_message_text(text=final_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(final_kb))
 
 if __name__ == '__main__':
     init_db()
     app = ApplicationBuilder().token(TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("send", send_post))
-    app.add_handler(CommandHandler("addlike", add_likes))
-    app.add_handler(CallbackQueryHandler(handle_like))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_name))
-    
+    app.add_handler(CommandHandler("newwheel", cmd_new_wheel))
+    app.add_handler(CommandHandler("add", cmd_add_participant))
+    app.add_handler(CommandHandler("setwinner", cmd_set_winner))
+    app.add_handler(CommandHandler("sendwheel", cmd_send_wheel))
+    app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r"^/setphoto"), cmd_set_photo))
+    app.add_handler(CallbackQueryHandler(handle_spin, pattern="^spin_"))
     app.run_polling()
-    
+        
