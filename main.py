@@ -224,4 +224,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r"^/setphoto"), cmd_set_photo))
     app.add_handler(CallbackQueryHandler(handle_spin, pattern="^spin_"))
     app.run_polling()
-        
+                                        
